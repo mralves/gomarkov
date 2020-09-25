@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-//Tokens are wrapped around a sequence of words to maintain the
-//start and end transition counts
+// Tokens are wrapped around a sequence of words to maintain the
+// start and end transition counts
 const (
 	StartToken = "$"
 	EndToken   = "^"
 )
 
-//Chain is a markov chain instance
+// Chain is a markov chain instance
 type Chain struct {
 	Order        int
 	statePool    *spool
@@ -24,44 +24,54 @@ type Chain struct {
 	lock         *sync.RWMutex
 }
 
-type chainJSON struct {
+func (chain Chain) Serializable() *SerializableChain {
+	return &SerializableChain{
+		Order:    chain.Order,
+		SpoolMap: chain.statePool.stringMap,
+		FreqMat:  chain.frequencyMat,
+	}
+}
+
+func FromSerializable(sChain *SerializableChain) *Chain {
+	chain := &Chain{}
+	chain.Order = sChain.Order
+	intMap := make(map[int]string)
+	for k, v := range sChain.SpoolMap {
+		intMap[v] = k
+	}
+	chain.statePool = &spool{
+		stringMap: sChain.SpoolMap,
+		intMap:    intMap,
+	}
+	chain.frequencyMat = sChain.FreqMat
+	chain.lock = new(sync.RWMutex)
+	return chain
+}
+
+type SerializableChain struct {
 	Order    int                 `json:"int"`
 	SpoolMap map[string]int      `json:"spool_map"`
 	FreqMat  map[int]sparseArray `json:"freq_mat"`
 }
 
-//MarshalJSON ...
+// MarshalJSON ...
 func (chain Chain) MarshalJSON() ([]byte, error) {
-	obj := chainJSON{
-		chain.Order,
-		chain.statePool.stringMap,
-		chain.frequencyMat,
-	}
+	obj := chain.Serializable()
 	return json.Marshal(obj)
 }
 
-//UnmarshalJSON ...
+// UnmarshalJSON ...
 func (chain *Chain) UnmarshalJSON(b []byte) error {
-	var obj chainJSON
+	var obj SerializableChain
 	err := json.Unmarshal(b, &obj)
 	if err != nil {
 		return err
 	}
-	chain.Order = obj.Order
-	intMap := make(map[int]string)
-	for k, v := range obj.SpoolMap {
-		intMap[v] = k
-	}
-	chain.statePool = &spool{
-		stringMap: obj.SpoolMap,
-		intMap:    intMap,
-	}
-	chain.frequencyMat = obj.FreqMat
-	chain.lock = new(sync.RWMutex)
+	*chain = *FromSerializable(&obj)
 	return nil
 }
 
-//NewChain creates an instance of Chain
+// NewChain creates an instance of Chain
 func NewChain(order int) *Chain {
 	chain := Chain{Order: order}
 	chain.statePool = &spool{
@@ -73,7 +83,7 @@ func NewChain(order int) *Chain {
 	return &chain
 }
 
-//Add adds the transition counts to the chain for a given sequence of words
+// Add adds the transition counts to the chain for a given sequence of words
 func (chain *Chain) Add(input []string) {
 	startTokens := array(StartToken, chain.Order)
 	endTokens := array(EndToken, chain.Order)
@@ -95,7 +105,7 @@ func (chain *Chain) Add(input []string) {
 	}
 }
 
-//TransitionProbability returns the transition probability between two states
+// TransitionProbability returns the transition probability between two states
 func (chain *Chain) TransitionProbability(next string, current NGram) (float64, error) {
 	if len(current) != chain.Order {
 		return 0, errors.New("N-gram length does not match chain order")
@@ -111,7 +121,7 @@ func (chain *Chain) TransitionProbability(next string, current NGram) (float64, 
 	return freq / sum, nil
 }
 
-//Generate generates new text based on an initial seed of words
+// Generate generates new text based on an initial seed of words
 func (chain *Chain) Generate(current NGram) (string, error) {
 	if len(current) != chain.Order {
 		return "", errors.New("N-gram length does not match chain order")
